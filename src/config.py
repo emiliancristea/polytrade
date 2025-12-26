@@ -63,7 +63,7 @@ class APIConfig:
 class TradingConfig:
     """Trading parameters with advanced thresholds."""
     min_profit_margin: float = field(
-        default_factory=lambda: float(os.getenv("MIN_PROFIT_MARGIN", "0.0001"))  # 0.01% - capture ANY profit
+        default_factory=lambda: float(os.getenv("MIN_PROFIT_MARGIN", "0.00001"))  # 0.001% - capture micro profits
     )
     max_position_size: float = field(
         default_factory=lambda: float(os.getenv("MAX_POSITION_SIZE", "100"))
