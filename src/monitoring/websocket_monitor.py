@@ -253,6 +253,9 @@ class WebSocketMonitor:
         Main WebSocket event loop with reconnection logic.
         Uses exponential backoff with jitter.
         """
+        self._running = True  # Ensure running is set
+        logger.debug(f"WebSocket run() started, _running={self._running}")
+
         while self._running:
             try:
                 # Connect if needed
@@ -292,8 +295,12 @@ class WebSocketMonitor:
 
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 self._ws = None
                 await self._wait_with_backoff()
+
+        logger.warning(f"WebSocket run loop exited. _running={self._running}")
 
     async def _wait_with_backoff(self):
         """Wait with exponential backoff and jitter before reconnecting."""
