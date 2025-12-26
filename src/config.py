@@ -63,13 +63,13 @@ class APIConfig:
 class TradingConfig:
     """Trading parameters with advanced thresholds."""
     min_profit_margin: float = field(
-        default_factory=lambda: float(os.getenv("MIN_PROFIT_MARGIN", "0.015"))  # 1.5% default (slippage buffer)
+        default_factory=lambda: float(os.getenv("MIN_PROFIT_MARGIN", "0.001"))  # 0.1% - capture micro-arb
     )
     max_position_size: float = field(
         default_factory=lambda: float(os.getenv("MAX_POSITION_SIZE", "100"))
     )
     min_liquidity: float = field(
-        default_factory=lambda: float(os.getenv("MIN_LIQUIDITY", "1000"))
+        default_factory=lambda: float(os.getenv("MIN_LIQUIDITY", "100"))  # Lower to find more opportunities
     )
     max_slippage: float = field(
         default_factory=lambda: float(os.getenv("MAX_SLIPPAGE", "0.01"))
