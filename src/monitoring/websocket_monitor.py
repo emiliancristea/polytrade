@@ -343,11 +343,14 @@ class WebSocketMonitor:
                 elif "asset_id" in data:
                     # Order book update without explicit type
                     await self._handle_book_update(data)
-                else:
+                elif msg_type:
+                    # Only log if there's actually a type we don't recognize
                     logger.debug(f"Unknown message type: {msg_type}")
 
         except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON: {message[:100]}")
+            # "INVALID OPERATION" is a known response for invalid subscriptions
+            if message != "INVALID OPERATION":
+                logger.warning(f"Invalid JSON: {message[:100]}")
         except Exception as e:
             logger.error(f"Message processing error: {e}")
 

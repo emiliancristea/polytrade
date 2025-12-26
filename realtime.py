@@ -35,14 +35,14 @@ logger.remove()
 logger.add(
     sys.stderr,
     format="<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
-    level="DEBUG",
+    level="INFO",  # Set to DEBUG for verbose output
     colorize=True,
 )
 logger.add(
     "logs/realtime_{time:YYYY-MM-DD}.log",
     rotation="1 day",
     retention="7 days",
-    level="INFO",
+    level="DEBUG",  # Keep detailed logs in file
 )
 
 
