@@ -136,24 +136,38 @@ class WebSocketMonitor:
 
     async def _heartbeat_loop(self):
         """Send periodic pings to keep connection alive."""
+        consecutive_failures = 0
+        max_failures = 3
+
         while self._running and self._ws:
             try:
                 await asyncio.sleep(self.ping_interval)
 
                 if is_ws_open(self._ws):
-                    # Send ping frame
-                    pong_waiter = await self._ws.ping()
-                    await asyncio.wait_for(pong_waiter, timeout=config.monitoring.ws_ping_timeout)
-                    logger.debug(f"[{self.ws_type}] Heartbeat OK")
+                    try:
+                        # Try ping frame
+                        pong_waiter = await self._ws.ping()
+                        await asyncio.wait_for(pong_waiter, timeout=config.monitoring.ws_ping_timeout)
+                        logger.debug(f"[{self.ws_type}] Heartbeat OK")
+                        consecutive_failures = 0
+                    except asyncio.TimeoutError:
+                        consecutive_failures += 1
+                        logger.debug(f"[{self.ws_type}] Ping timeout ({consecutive_failures}/{max_failures})")
+                        if consecutive_failures >= max_failures:
+                            logger.warning(f"[{self.ws_type}] Too many heartbeat failures")
+                            break
+                    except Exception as e:
+                        # Some servers don't support ping - that's OK
+                        logger.debug(f"[{self.ws_type}] Ping not supported: {e}")
+                        consecutive_failures = 0  # Reset since connection might still work
 
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.ws_type}] Heartbeat timeout - connection may be dead")
-                break
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"[{self.ws_type}] Heartbeat error: {e}")
-                break
+                consecutive_failures += 1
+                if consecutive_failures >= max_failures:
+                    break
 
     async def subscribe(self, token_ids: List[str]) -> bool:
         """
