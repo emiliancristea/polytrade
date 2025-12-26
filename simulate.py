@@ -98,34 +98,31 @@ class ArbitrageSimulator:
             current_balance=starting_balance,
         )
 
-        # Position sizing
-        self.max_position_pct = 0.10  # Max 10% per trade
-        self.min_trade_size = 1.0     # $1 minimum
+        # Position sizing - AGGRESSIVE for faster compounding
+        self.max_position_pct = 0.25  # Max 25% per trade (was 10%)
+        self.min_trade_size = 5.0     # $5 minimum (larger trades)
 
         # Track active positions
         self.positions: Dict[str, Dict] = {}
 
     def calculate_trade_size(self, profit_margin: float) -> float:
         """
-        Calculate optimal trade size based on Kelly Criterion.
+        Calculate optimal trade size - AGGRESSIVE for compounding.
 
-        For arbitrage (guaranteed profit), we can be more aggressive,
-        but we still limit position size for safety.
+        For arbitrage (guaranteed profit), we go big since it's risk-free.
+        Larger trades = faster compounding.
         """
         max_size = self.stats.current_balance * self.max_position_pct
 
-        # Scale with profit margin (larger margin = larger position)
-        # But cap at max_position_pct of balance
-        if profit_margin > 0.01:  # > 1% profit
+        # Be aggressive - arbitrage is guaranteed profit!
+        if profit_margin > 0.005:  # > 0.5% profit - GO ALL IN
             size = max_size
-        elif profit_margin > 0.005:  # > 0.5%
-            size = max_size * 0.75
-        elif profit_margin > 0.001:  # > 0.1%
-            size = max_size * 0.5
-        else:
-            size = max_size * 0.25
+        elif profit_margin > 0.001:  # > 0.1% profit
+            size = max_size * 0.8
+        else:  # Even tiny profits - still trade big
+            size = max_size * 0.6
 
-        return max(self.min_trade_size, min(size, max_size))
+        return max(self.min_trade_size, min(size, self.stats.current_balance * 0.5))
 
     async def on_opportunity(self, opp: Dict[str, Any]):
         """
