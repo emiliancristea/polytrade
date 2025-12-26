@@ -312,6 +312,22 @@ async def run_simulation(starting_balance: float, duration_minutes: Optional[int
     logger.info("Starting real-time monitoring... Press Ctrl+C to stop")
     print("")
 
+    # Start a status printer task
+    async def print_status():
+        """Print status every 30 seconds."""
+        while True:
+            await asyncio.sleep(30)
+            stats = scanner.get_stats()
+            logger.info(
+                f"[STATUS] Updates: {stats['price_updates_processed']} | "
+                f"Scans: {stats['scans_performed']} | "
+                f"Opportunities: {simulator.stats.opportunities_seen} | "
+                f"Trades: {simulator.stats.total_trades} | "
+                f"Balance: ${simulator.stats.current_balance:.2f}"
+            )
+
+    status_task = asyncio.create_task(print_status())
+
     # Run scanner with optional timeout
     try:
         if duration_minutes:
@@ -328,6 +344,11 @@ async def run_simulation(starting_balance: float, duration_minutes: Optional[int
     except KeyboardInterrupt:
         logger.info("Simulation stopped by user")
     finally:
+        status_task.cancel()
+        try:
+            await status_task
+        except asyncio.CancelledError:
+            pass
         await scanner.stop()
         simulator.print_summary()
 
