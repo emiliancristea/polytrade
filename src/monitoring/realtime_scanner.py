@@ -85,26 +85,29 @@ class RealtimeArbitrageScanner:
             if not condition_id:
                 continue
 
-            # Parse tokens
-            tokens = market.get("tokens", [])
-            if len(tokens) < 2:
+            # Parse clobTokenIds - this is where YES/NO token IDs are stored
+            clob_token_ids = market.get("clobTokenIds")
+            if not clob_token_ids:
                 continue
 
-            yes_token = None
-            no_token = None
+            # Parse if it's a JSON string
+            if isinstance(clob_token_ids, str):
+                try:
+                    clob_token_ids = json.loads(clob_token_ids)
+                except json.JSONDecodeError:
+                    continue
 
-            for token in tokens:
-                outcome = token.get("outcome", "").upper()
-                token_id = token.get("token_id")
-                if outcome == "YES" and token_id:
-                    yes_token = token_id
-                elif outcome == "NO" and token_id:
-                    no_token = token_id
+            if not isinstance(clob_token_ids, list) or len(clob_token_ids) < 2:
+                continue
+
+            # clobTokenIds[0] = YES, clobTokenIds[1] = NO
+            yes_token = str(clob_token_ids[0])
+            no_token = str(clob_token_ids[1])
 
             if not yes_token or not no_token:
                 continue
 
-            # Parse current prices
+            # Parse current prices from outcomePrices
             outcome_prices = market.get("outcomePrices", "")
             if isinstance(outcome_prices, str):
                 try:
@@ -129,8 +132,8 @@ class RealtimeArbitrageScanner:
                 "no_token": no_token,
                 "yes_price": yes_price,
                 "no_price": no_price,
-                "volume": float(market.get("volume", 0)),
-                "liquidity": float(market.get("liquidity", 0)),
+                "volume": float(market.get("volume", 0) or 0),
+                "liquidity": float(market.get("liquidity", 0) or 0),
                 "last_update": datetime.now(),
             }
 
@@ -168,11 +171,22 @@ class RealtimeArbitrageScanner:
         Handle real-time price update from WebSocket.
 
         This is the hot path - must be extremely fast.
+
+        For arbitrage detection, we use the BEST ASK price because:
+        - To buy YES, we pay the best ask price
+        - To buy NO, we pay the best ask price
+        - If YES_ask + NO_ask < $1.00, we have arbitrage
         """
         self._price_updates_processed += 1
 
         token_id = data.get("token_id")
-        if not token_id or token_id not in self._token_to_condition:
+        if not token_id:
+            return
+
+        # Convert to string for consistent lookup
+        token_id = str(token_id)
+
+        if token_id not in self._token_to_condition:
             return
 
         condition_id = self._token_to_condition[token_id]
@@ -180,30 +194,30 @@ class RealtimeArbitrageScanner:
         if not market:
             return
 
-        # Update price based on which token changed
-        new_price = data.get("price")
-        if new_price is None:
-            # Try to get from book update
-            if data.get("type") == "book":
-                # Use midpoint of best bid/ask
-                best_bid = data.get("best_bid", 0)
-                best_ask = data.get("best_ask", 1)
-                if best_bid > 0 and best_ask < 1:
-                    new_price = (best_bid + best_ask) / 2
-                else:
-                    return
-            else:
-                return
+        # Get the best ask price (what we'd pay to buy this outcome)
+        # For arbitrage, we care about ask prices since we're buying
+        best_ask = data.get("best_ask")
+        if best_ask is None:
+            # Try mid price as fallback
+            best_ask = data.get("price")
+        if best_ask is None:
+            return
 
-        # Determine if YES or NO token
+        new_price = float(best_ask)
+
+        # Determine if YES or NO token and update
         if token_id == market["yes_token"]:
             old_price = market["yes_price"]
-            market["yes_price"] = float(new_price)
-            logger.debug(f"YES price update: {old_price:.4f} -> {new_price:.4f}")
+            if abs(new_price - old_price) > 0.0001:  # Only log significant changes
+                logger.debug(f"YES ask update: {old_price:.4f} -> {new_price:.4f}")
+            market["yes_price"] = new_price
         elif token_id == market["no_token"]:
             old_price = market["no_price"]
-            market["no_price"] = float(new_price)
-            logger.debug(f"NO price update: {old_price:.4f} -> {new_price:.4f}")
+            if abs(new_price - old_price) > 0.0001:
+                logger.debug(f"NO ask update: {old_price:.4f} -> {new_price:.4f}")
+            market["no_price"] = new_price
+        else:
+            return
 
         market["last_update"] = datetime.now()
 

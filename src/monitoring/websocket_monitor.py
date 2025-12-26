@@ -17,10 +17,26 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 import websockets
 from websockets.exceptions import ConnectionClosed
+from websockets.protocol import State
 from loguru import logger
 
 from src.config import config
 from src.api.rate_limiter import rate_limiter
+
+
+def is_ws_open(ws) -> bool:
+    """Check if websocket connection is open (compatible with websockets 15.x)."""
+    if ws is None:
+        return False
+    try:
+        # websockets 15.x uses state property
+        return ws.state == State.OPEN
+    except AttributeError:
+        # Fallback for older versions
+        try:
+            return not ws.closed
+        except AttributeError:
+            return False
 
 
 class WebSocketMonitor:
@@ -124,7 +140,7 @@ class WebSocketMonitor:
             try:
                 await asyncio.sleep(self.ping_interval)
 
-                if self._ws and not self._ws.closed:
+                if is_ws_open(self._ws):
                     # Send ping frame
                     pong_waiter = await self._ws.ping()
                     await asyncio.wait_for(pong_waiter, timeout=config.monitoring.ws_ping_timeout)
@@ -150,7 +166,7 @@ class WebSocketMonitor:
         Returns:
             True if subscription successful
         """
-        if not self._ws or self._ws.closed:
+        if not is_ws_open(self._ws):
             logger.error("WebSocket not connected")
             return False
 
@@ -199,7 +215,7 @@ class WebSocketMonitor:
 
     async def unsubscribe(self, token_ids: List[str]):
         """Unsubscribe from token updates."""
-        if not self._ws or self._ws.closed:
+        if not is_ws_open(self._ws):
             return
 
         tokens_to_unsub = [t for t in token_ids if t in self._subscribed_tokens]
@@ -240,7 +256,7 @@ class WebSocketMonitor:
         while self._running:
             try:
                 # Connect if needed
-                if not self._ws or self._ws.closed:
+                if not is_ws_open(self._ws):
                     if not await self.connect():
                         await self._wait_with_backoff()
                         continue
@@ -300,22 +316,35 @@ class WebSocketMonitor:
 
         try:
             data = json.loads(message)
-            msg_type = data.get("type", "")
 
-            if msg_type == "price_change":
-                await self._handle_price_update(data)
-            elif msg_type == "book":
-                await self._handle_book_update(data)
-            elif msg_type == "trade":
-                await self._handle_trade(data)
-            elif msg_type == "subscribed":
-                logger.debug(f"Subscription confirmed: {len(data.get('assets_ids', []))} tokens")
-            elif msg_type == "error":
-                logger.error(f"WebSocket error: {data}")
-            elif msg_type == "pong":
-                pass  # Heartbeat response
-            else:
-                logger.debug(f"Unknown message type: {msg_type}")
+            # Polymarket sends messages as a list of updates
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        await self._handle_book_update(item)
+                return
+
+            # Handle single dict messages
+            if isinstance(data, dict):
+                msg_type = data.get("type", "")
+
+                if msg_type == "price_change":
+                    await self._handle_price_update(data)
+                elif msg_type == "book":
+                    await self._handle_book_update(data)
+                elif msg_type == "trade":
+                    await self._handle_trade(data)
+                elif msg_type == "subscribed":
+                    logger.debug(f"Subscription confirmed: {len(data.get('assets_ids', []))} tokens")
+                elif msg_type == "error":
+                    logger.error(f"WebSocket error: {data}")
+                elif msg_type == "pong":
+                    pass  # Heartbeat response
+                elif "asset_id" in data:
+                    # Order book update without explicit type
+                    await self._handle_book_update(data)
+                else:
+                    logger.debug(f"Unknown message type: {msg_type}")
 
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON: {message[:100]}")
@@ -347,17 +376,37 @@ class WebSocketMonitor:
         bids = data.get("bids", [])
         asks = data.get("asks", [])
 
+        # Calculate best bid/ask (these are the prices we care about for arbitrage)
+        best_bid = 0.0
+        best_ask = 1.0
+
+        if bids:
+            try:
+                best_bid = max(float(b.get("price", 0)) for b in bids)
+            except (ValueError, TypeError):
+                pass
+
+        if asks:
+            try:
+                best_ask = min(float(a.get("price", 1)) for a in asks)
+            except (ValueError, TypeError):
+                pass
+
+        # Calculate mid price for the callback
+        mid_price = (best_bid + best_ask) / 2 if best_bid > 0 and best_ask < 1 else None
+
         book_data = {
-            "token_id": asset_id,
+            "token_id": str(asset_id),
             "bids": bids,
             "asks": asks,
-            "best_bid": max((float(b.get("price", 0)) for b in bids), default=0) if bids else 0,
-            "best_ask": min((float(a.get("price", 0)) for a in asks), default=1) if asks else 1,
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "price": mid_price,  # Add mid price for easier processing
             "timestamp": datetime.now(),
             "type": "book",
         }
 
-        self._price_cache[asset_id] = book_data
+        self._price_cache[str(asset_id)] = book_data
         await self._trigger_callbacks(book_data)
 
     async def _handle_trade(self, data: Dict[str, Any]):
@@ -395,7 +444,7 @@ class WebSocketMonitor:
     @property
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
-        return self._ws is not None and not self._ws.closed
+        return is_ws_open(self._ws)
 
     @property
     def subscribed_count(self) -> int:
