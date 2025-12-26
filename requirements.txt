@@ -1,0 +1,42 @@
+# Polymarket Trading Bot Dependencies
+
+# Official Polymarket Client
+py-clob-client>=0.18.0
+
+# Web3 and Blockchain
+web3>=6.0.0
+eth-account>=0.10.0
+
+# HTTP and WebSocket
+requests>=2.31.0
+aiohttp>=3.9.0
+websockets>=12.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Async Support
+asyncio-throttle>=1.0.0
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+
+# CLI and Display
+rich>=13.0.0
+click>=8.1.0
+
+# Scheduling
+schedule>=1.2.0
+APScheduler>=3.10.0
+
+# Logging
+loguru>=0.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Optional: For Telegram notifications
+python-telegram-bot>=20.0
